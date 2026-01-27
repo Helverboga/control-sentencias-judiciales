@@ -2,243 +2,238 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import time
 
-# --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Control Sentencias Cloud", page_icon="⚖️", layout="wide")
+# --- CONFIGURACIÓN DE PÁGINA Y ESTILOS ---
+st.set_page_config(
+    page_title="Control de Sentencias Cloud",
+    page_icon="⚖️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- CONEXIÓN CON GOOGLE SHEETS ---
-def get_google_sheet():
-    """Conecta con Google Sheets usando los Secretos de Streamlit"""
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    
-    # Crear credenciales desde los secrets de Streamlit
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(creds)
-    
-    # Abrir la hoja de cálculo
-    try:
-        sheet = client.open("DB_Control_Sentencias")
-        return sheet
-    except gspread.SpreadsheetNotFound:
-        st.error("🚨 No encontré la hoja 'DB_Control_Sentencias'. ¡Créala en tu Drive y compártela con el robot!")
-        st.stop()
-
-def init_sheets():
-    """Inicializa las pestañas si no existen"""
-    sh = get_google_sheet()
-    
-    # 1. Hoja de PROCESOS
-    try:
-        w_proc = sh.worksheet("Procesos")
-    except:
-        w_proc = sh.add_worksheet(title="Procesos", rows="100", cols="10")
-        w_proc.append_row(["id_unico", "radicado", "fecha_inicio", "estado", "fase_actual", "progreso", "alertas"])
-
-    # 2. Hoja de TIEMPOS (Cronómetros)
-    try:
-        w_time = sh.worksheet("Tiempos")
-    except:
-        w_time = sh.add_worksheet(title="Tiempos", rows="1000", cols="5")
-        w_time.append_row(["id_unico", "fase", "tiempo_acumulado", "ultimo_inicio", "estado_timer"])
-
-    # 3. Hoja de PASOS (Checklist)
-    try:
-        w_steps = sh.worksheet("Pasos")
-    except:
-        w_steps = sh.add_worksheet(title="Pasos", rows="1000", cols="5")
-        w_steps.append_row(["id_unico", "fase", "paso_index", "completado", "fecha_check"])
-
-    return w_proc, w_time, w_steps
+# Estilos CSS (Los mismos que te gustaban)
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5em;
+        font-weight: bold;
+        text-align: center;
+        color: #1f4e79;
+        margin-bottom: 30px;
+        border-bottom: 3px solid #d4a574;
+        padding-bottom: 10px;
+    }
+    .phase-card {
+        background-color: #f8f9fa;
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 5px solid #1f4e79;
+        margin: 10px 0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #1f4e79, #2d5aa0);
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        margin: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # --- DEFINICIÓN DE FASES (Tu lógica original) ---
 FASES_PROCESO = {
     "I. Fase Propedéutica": {
-        "limite_dias": None,
+        "tiempo_estimado": "Variable",
+        "descripcion": "Preparación inicial y auto de pruebas",
         "pasos": [
-            "01) Copiar y pegar Kit", "02) Cambiar nombre carpeta", "03) Crear carpeta mes",
-            "04) Descargar expediente", "05) Aprovisionar herramientas", "06) Editar e imprimir",
-            "07) Índice del expediente", "08) Foto del proceso", "09) Estructurar piezas",
-            "10) Reporte de pruebas", "11) Fáctum", "12) Auto de pruebas", "13) Enviar a notificación"
+            "01) Copiar y pegar 0.Kit", "02) Cambiar nombre a 0. Kit", "03) Crear carpeta mes",
+            "04) Descargar expediente digital", "05) Aprovisionar herramientas", "06) Editar e imprimir",
+            "07) Índice del expediente", "08) Foto del proceso", "09) Estructurar piezas procesales",
+            "10) Reporte de pruebas", "11) Hago el fáctum", "12) Elaboro auto de pruebas",
+            "13) Comparo, corrijo y notifico"
         ]
     },
-    "II. Fase Lectura": {
-        "limite_dias": 0.5,
-        "pasos": ["01) Lectura comprensiva", "02) Identificar claves", "03) Toma de notas"]
+    "II. Fase Lectura del Expediente": {
+        "tiempo_estimado": "0.5 días",
+        "descripcion": "Lectura comprensiva",
+        "pasos": ["01) Lectura completa", "02) Identificación puntos clave", "03) Toma de notas"]
     },
-    "III. Fase Sentencia": {
-        "limite_dias": 5.0,
+    "III. Fase Elaboración de la Sentencia": {
+        "tiempo_estimado": "5 días hábiles",
+        "descripcion": "Redacción del fallo",
         "pasos": [
-            "01) Elegir modelo", "02) Sintetizar escritos", "03) Agregar síntesis",
-            "04) Investigación jurídica", "05) Guardar insumos", "06) Jurisprudencia temas",
-            "07) Valorar pruebas", "08) 6 etapas sentencia oral", "09) Enriquecer proyecto",
-            "10) Guardar fallo final"
+            "01) Elegir modelo y rotular", "02) Sintetizar escritos", "03) Agregar síntesis al borrador",
+            "04) Investigación jurídica", "05) Alojar investigaciones", "06) Investigación jurisprudencial",
+            "07) Valorar pruebas", "08) Elaborar 6 etapas sentencia", "09) Enriquecer proyecto",
+            "10) Guardar proyecto final"
         ]
     },
-    "IV. Fase Audiencia": {
-        "limite_dias": 2.0,
-        "pasos": ["01) Operar algoritmo", "02) Presupuestos proc/sust", "03) Crear capa", 
-                  "04) Asistencia", "05) Roteiro"]
+    "IV. Fase Preparación Audiencia": {
+        "tiempo_estimado": "2 días",
+        "descripcion": "Preparación para la oralidad",
+        "pasos": ["01) Operar algoritmo", "02) Presupuestos procesales", "03) Crear capa", 
+                  "04) Control asistencia", "05) Roteiro"]
     }
 }
 
-# --- FUNCIONES DE LÓGICA ---
+# --- CONEXIÓN CON GOOGLE SHEETS ---
+@st.cache_resource
+def get_connection():
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    return client
+
+def get_data():
+    client = get_connection()
+    try:
+        sh = client.open("DB_Control_Sentencias")
+    except:
+        st.error("🚨 No encuentro la hoja 'DB_Control_Sentencias'.")
+        st.stop()
+        
+    # Obtener o crear hojas
+    try:
+        w_proc = sh.worksheet("Procesos")
+    except:
+        w_proc = sh.add_worksheet("Procesos", 100, 10)
+        w_proc.append_row(["id", "radicado", "fecha", "estado", "fase_actual", "progreso"])
+        
+    try:
+        w_detalles = sh.worksheet("Detalles")
+    except:
+        w_detalles = sh.add_worksheet("Detalles", 1000, 10)
+        # Estructura: id_proceso, fase, paso_idx, completado(0/1), tiempo_acumulado, timer_start, timer_active(0/1)
+        w_detalles.append_row(["id_proceso", "fase", "paso_idx", "completado", "tiempo_acumulado", "timer_start", "timer_active"])
+        
+    return w_proc, w_detalles
+
+# --- FUNCIONES AUXILIARES ---
 def formatear_tiempo(segundos):
     if segundos < 60: return f"{int(segundos)}s"
-    minutes = int(segundos // 60)
-    if minutes < 60: return f"{minutes}m {int(segundos % 60)}s"
-    hours = int(minutes // 60)
-    return f"{hours}h {minutes % 60}m"
+    elif segundos < 3600: return f"{int(segundos//60)}m {int(segundos%60)}s"
+    else: return f"{int(segundos//3600)}h {int((segundos%3600)//60)}m"
 
-# --- INTERFAZ PRINCIPAL ---
-def main():
-    st.title("⚖️ Control de Sentencias (Cloud Sync)")
+# --- INTERFAZ DE USUARIO ---
+
+def mostrar_dashboard(df_proc):
+    st.markdown('<div class="main-header">📊 Dashboard - Resumen General</div>', unsafe_allow_html=True)
     
-    # Inicializar DB
-    if 'db_ready' not in st.session_state:
-        with st.spinner("Conectando con Google Sheets..."):
-            init_sheets()
-        st.session_state.db_ready = True
+    if df_proc.empty:
+        st.info("👋 No hay procesos activos. Inicia uno nuevo en el menú lateral.")
+        return
+
+    # Métricas
+    total = len(df_proc)
+    promedio = df_proc['progreso'].mean()
+    fase_comun = df_proc['fase_actual'].mode()[0] if not df_proc.empty else "N/A"
+
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(f'<div class="metric-card"><h3>📋 Procesos</h3><h2>{total}</h2></div>', unsafe_allow_html=True)
+    c2.markdown(f'<div class="metric-card"><h3>📈 Progreso Promedio</h3><h2>{promedio:.1f}%</h2></div>', unsafe_allow_html=True)
+    c3.markdown(f'<div class="metric-card"><h3>🎯 Fase Más Común</h3><h4>{fase_comun}</h4></div>', unsafe_allow_html=True)
+
+    st.markdown("### 📊 Progreso por Proceso")
+    fig = px.bar(df_proc, x='radicado', y='progreso', color='fase_actual', title="Estado Actual")
+    st.plotly_chart(fig, use_container_width=True)
+
+def nuevo_proceso(w_proc):
+    st.markdown('<div class="main-header">➕ Nuevo Expediente</div>', unsafe_allow_html=True)
     
-    sh = get_google_sheet()
-    w_proc = sh.worksheet("Procesos")
-    w_time = sh.worksheet("Tiempos")
-    w_steps = sh.worksheet("Pasos")
+    with st.form("frm_new"):
+        radicado = st.text_input("Número de Radicado / Proceso", placeholder="Ej: 2026-001-CIVIL")
+        
+        # Mostrar fases informativas
+        st.info("El proceso se creará con las 4 Fases estándar configuradas.")
+        
+        if st.form_submit_button("🚀 Crear Proceso"):
+            # Validar duplicados
+            datos = w_proc.get_all_records()
+            df = pd.DataFrame(datos)
+            if not df.empty and str(radicado) in df['radicado'].astype(str).values:
+                st.error("¡Este radicado ya existe!")
+            else:
+                new_id = int(time.time())
+                fecha = datetime.now().strftime("%Y-%m-%d")
+                w_proc.append_row([new_id, radicado, fecha, "Activo", "I. Fase Propedéutica", 0])
+                st.success(f"✅ Proceso {radicado} creado exitosamente.")
+                time.sleep(1)
+                st.rerun()
 
-    # Sidebar
-    menu = st.sidebar.radio("Menú", ["🏠 Dashboard", "➕ Nuevo Proceso", "📂 Mis Procesos"])
-
-    # 1. NUEVO PROCESO
-    if menu == "➕ Nuevo Proceso":
-        st.header("Registrar Nuevo Proceso")
-        with st.form("new_proc"):
-            radicado = st.text_input("Número de Radicado (Ej: 2025-001)")
-            if st.form_submit_button("Crear Expediente"):
-                # Verificar duplicados
-                df_p = pd.DataFrame(w_proc.get_all_records())
-                if not df_p.empty and str(radicado) in df_p['radicado'].astype(str).values:
-                    st.error("¡Ese radicado ya existe!")
-                else:
-                    # Crear ID único basado en timestamp
-                    new_id = int(time.time())
-                    fecha = datetime.now().strftime("%Y-%m-%d")
-                    w_proc.append_row([new_id, radicado, fecha, "Activo", "I. Fase Propedéutica", 0, "Normal"])
-                    st.success(f"Proceso {radicado} creado en la Nube ☁️")
-                    time.sleep(1)
+def gestionar_proceso(w_proc, w_detalles, df_proc):
+    st.markdown('<div class="main-header">📂 Gestión de Expedientes</div>', unsafe_allow_html=True)
+    
+    lista_procs = df_proc['radicado'].tolist()
+    seleccion = st.selectbox("Selecciona un Expediente para trabajar:", lista_procs)
+    
+    # Obtener datos del proceso
+    proc_row = df_proc[df_proc['radicado'] == seleccion].iloc[0]
+    proc_id = int(proc_row['id'])
+    
+    # Header del proceso
+    st.markdown(f"""
+    <div style="background-color:#e9ecef;padding:15px;border-radius:10px;margin-bottom:20px;">
+        <h3>📌 Expediente: {seleccion}</h3>
+        <p><strong>Estado:</strong> {proc_row['estado']} | <strong>Fase:</strong> {proc_row['fase_actual']}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Cargar detalles (pasos y tiempos)
+    all_detalles = w_detalles.get_all_records()
+    df_det = pd.DataFrame(all_detalles)
+    
+    # Filtrar solo de este proceso
+    if not df_det.empty:
+        df_det = df_det[df_det['id_proceso'] == proc_id]
+    
+    # --- ITERAR FASES ---
+    total_pasos_global = 0
+    total_completados_global = 0
+    
+    for fase_nombre, info in FASES_PROCESO.items():
+        with st.expander(f"📂 {fase_nombre}", expanded=(fase_nombre == proc_row['fase_actual'])):
+            
+            # --- SECCIÓN A: CRONÓMETRO ---
+            # Buscar info de tiempo en df_det (usamos paso_idx = -1 para guardar el tiempo general de la fase)
+            time_row = df_det[(df_det['fase'] == fase_nombre) & (df_det['paso_idx'] == -1)]
+            
+            tiempo_acumulado = 0.0
+            timer_active = 0
+            timer_start = 0.0
+            
+            if not time_row.empty:
+                tiempo_acumulado = float(time_row.iloc[0]['tiempo_acumulado'])
+                timer_active = int(time_row.iloc[0]['timer_active'])
+                timer_start = float(time_row.iloc[0]['timer_start'])
+            
+            # Calculo tiempo real
+            tiempo_mostrar = tiempo_acumulado
+            if timer_active:
+                tiempo_mostrar += (time.time() - timer_start)
+                time.sleep(1) # Refresco para efecto visual
+                st.rerun()
+            
+            c1, c2, c3 = st.columns([2,1,1])
+            c1.markdown(f"#### ⏱️ Tiempo: `{formatear_tiempo(tiempo_mostrar)}`")
+            
+            if timer_active:
+                if c2.button("⏸️ Pausar", key=f"p_{proc_id}_{fase_nombre}"):
+                    # Guardar pausa
+                    nuevo_acumulado = tiempo_acumulado + (time.time() - timer_start)
+                    # Lógica de actualización en Sheets (borrar viejo, poner nuevo)
+                    # Nota: Para producción masiva esto se optimiza, aquí usamos append/filter simple
+                    filas_a_borrar = w_detalles.findall(str(proc_id))
+                    # (Simplificación: Agregamos una nueva fila de estado y filtraremos por la última fecha/logica)
+                    # MEJOR: Usar celdas específicas es complejo sin IDs de fila. 
+                    # ESTRATEGIA: Appending log. Tomamos el último estado.
+                    w_detalles.append_row([proc_id, fase_nombre, -1, 0, nuevo_acumulado, 0, 0])
                     st.rerun()
-
-    # 2. DASHBOARD / MIS PROCESOS
-    elif menu in ["🏠 Dashboard", "📂 Mis Procesos"]:
-        # Cargar datos
-        df_proc = pd.DataFrame(w_proc.get_all_records())
-        
-        if df_proc.empty:
-            st.info("No hay procesos activos. Ve a 'Nuevo Proceso' para comenzar.")
-            return
-
-        # Selector de proceso
-        lista_procs = df_proc['radicado'].tolist()
-        seleccion = st.selectbox("Seleccionar Proceso para trabajar:", lista_procs)
-        
-        # Obtener datos del proceso seleccionado
-        proc_data = df_proc[df_proc['radicado'] == seleccion].iloc[0]
-        id_actual = int(proc_data['id_unico'])
-        
-        st.divider()
-        col1, col2, col3 = st.columns(3)
-        col1.metric("📅 Radicado", proc_data['radicado'])
-        col2.metric("🚀 Fase Actual", proc_data['fase_actual'])
-        col3.metric("📈 Progreso", f"{proc_data['progreso']}%")
-        
-        st.divider()
-
-        # --- GESTOR DE FASES ---
-        df_times = pd.DataFrame(w_time.get_all_records())
-        df_steps = pd.DataFrame(w_steps.get_all_records())
-
-        for fase_nombre, info in FASES_PROCESO.items():
-            with st.expander(f"📂 {fase_nombre}", expanded=(fase_nombre == proc_data['fase_actual'])):
-                
-                # A. Lógica del Cronómetro
-                # Buscar datos de tiempo para este proceso y fase
-                tiempo_row = df_times[(df_times['id_unico'] == id_actual) & (df_times['fase'] == fase_nombre)]
-                
-                tiempo_acumulado = 0.0
-                estado_timer = "Stop"
-                ultimo_inicio = 0.0
-                
-                if not tiempo_row.empty:
-                    tiempo_acumulado = float(tiempo_row.iloc[0]['tiempo_acumulado'])
-                    estado_timer = tiempo_row.iloc[0]['estado_timer']
-                    ultimo_inicio = float(tiempo_row.iloc[0]['ultimo_inicio'])
-
-                # Calcular tiempo real si está corriendo
-                tiempo_mostrar = tiempo_acumulado
-                if estado_timer == "Running":
-                    tiempo_mostrar += (time.time() - ultimo_inicio)
-                    # Auto-refresh para ver el cronómetro andar
-                    time.sleep(1) 
-                    st.rerun()
-
-                c1, c2, c3 = st.columns([2,1,1])
-                c1.markdown(f"⏱️ **Tiempo invertido:** `{formatear_tiempo(tiempo_mostrar)}`")
-                
-                # Botones de control (Play/Pause)
-                if estado_timer == "Stop":
-                    if c2.button("▶️ Iniciar", key=f"start_{fase_nombre}"):
-                        # Si no existe fila, crearla, si existe actualizar
-                        cell = w_time.find(str(id_actual)) # Búsqueda simplificada
-                        # Lógica robusta de actualización:
-                        if tiempo_row.empty:
-                            w_time.append_row([id_actual, fase_nombre, 0.0, time.time(), "Running"])
-                        else:
-                            # Encontrar la fila exacta (esto requiere filtro en GSheets, simplificamos borrando y agregando para evitar complejidad de índices)
-                            # Para producción: usar row index. Aquí usaremos lógica de append simple y limpieza periódica o filtrado
-                            # MÉTODO SEGURO: Usar celdas específicas. (Simplificado para este ejemplo: Borrar fila vieja y poner nueva)
-                            row_index = tiempo_row.index[0] + 2 # +2 por header y 0-index
-                            w_time.update_cell(row_index, 4, time.time()) # Actualizar ultimo_inicio
-                            w_time.update_cell(row_index, 5, "Running") # Actualizar estado
-                        st.rerun()
-                else:
-                    if c2.button("⏸️ Pausar", key=f"pause_{fase_nombre}"):
-                        nuevo_acumulado = tiempo_acumulado + (time.time() - ultimo_inicio)
-                        row_index = tiempo_row.index[0] + 2
-                        w_time.update_cell(row_index, 3, nuevo_acumulado)
-                        w_time.update_cell(row_index, 5, "Stop")
-                        st.rerun()
-
-                # B. Checklist de Pasos
-                st.markdown("---")
-                pasos_fase = info['pasos']
-                
-                # Filtrar pasos guardados
-                pasos_guardados = df_steps[(df_steps['id_unico'] == id_actual) & (df_steps['fase'] == fase_nombre)]
-                indices_completados = pasos_guardados['paso_index'].tolist()
-
-                completed_count = 0
-                for i, paso_txt in enumerate(pasos_fase):
-                    check_key = f"chk_{id_actual}_{fase_nombre}_{i}"
-                    is_checked = i in indices_completados
-                    
-                    if st.checkbox(paso_txt, value=is_checked, key=check_key):
-                        completed_count += 1
-                        if not is_checked:
-                            # Guardar nuevo check en Nube
-                            w_steps.append_row([id_actual, fase_nombre, i, "TRUE", str(datetime.now())])
-                            st.rerun()
-                    else:
-                        if is_checked:
-                            # Si se desmarca, habría que borrar de la hoja (complejo en gspread simple)
-                            # Por ahora, advertimos:
-                            st.warning("Para desmarcar, contacta al admin (o borra en el Excel).")
-
-                # Actualizar Progreso General
-                if len(pasos_fase) > 0:
-                    avance = (completed_count / len(pasos_fase)) * 100
-                    # (Aquí se podría actualizar la celda de progreso en w_proc)
-
-if __name__ == "__main__":
-    main()
+            else:
+                if c2.button("▶️ Iniciar", key=f"s_{proc_id}_{fase_nombre}"):
+                    w_detalles.append_row([proc_id, fase_nombre,
