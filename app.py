@@ -6,7 +6,7 @@ import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# --- 1. CONFIGURACIÓN Y ESTILOS ---
+# --- 1. CONFIGURACIÓN ---
 st.set_page_config(
     page_title="Magistratura Cloud",
     page_icon="⚖️",
@@ -14,7 +14,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS Personalizado (El diseño bonito)
 st.markdown("""
 <style>
     .main-header {
@@ -24,7 +23,6 @@ st.markdown("""
         text-align: center;
         border-bottom: 3px solid #d4a574;
         margin-bottom: 20px;
-        padding-bottom: 10px;
     }
     .metric-card {
         background: linear-gradient(135deg, #1f4e79, #2d5aa0);
@@ -32,14 +30,6 @@ st.markdown("""
         padding: 15px;
         border-radius: 10px;
         text-align: center;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
-    }
-    .phase-header {
-        background-color: #f8f9fa;
-        padding: 10px;
-        border-left: 5px solid #1f4e79;
-        border-radius: 5px;
-        margin-top: 10px;
     }
     .stProgress > div > div > div > div {
         background-color: #28a745;
@@ -47,62 +37,38 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. DEFINICIÓN DETALLADA DE FASES ---
+# --- 2. FASES ---
 FASES_PROCESO = {
     "I. Fase Propedéutica": {
         "descripcion": "Preparación y Auto de Pruebas",
         "pasos": [
-            "01) Copiar y pegar 0.Kit",
-            "02) Cambiar nombre a 0. Kit", 
-            "03) Crear carpeta en el mes correspondiente",
-            "04) Descargar expediente digital",
-            "05) Aprovisionar de herramientas la carpeta",
-            "06) Editar e imprimir",
-            "07) Índice del expediente",
-            "08) Foto del proceso",
-            "09) Estructurar piezas procesales",
-            "10) Reporte de pruebas",
-            "11) Hago el fáctum",
-            "12) Elaboro el auto de pruebas",
-            "13) Comparo, corrijo y envío a notificación"
+            "01) Copiar y pegar 0.Kit", "02) Cambiar nombre a 0. Kit", "03) Crear carpeta mes",
+            "04) Descargar expediente", "05) Aprovisionar herramientas", "06) Editar e imprimir",
+            "07) Índice del expediente", "08) Foto del proceso", "09) Estructurar piezas",
+            "10) Reporte de pruebas", "11) Fáctum", "12) Auto de pruebas", "13) Notificar"
         ]
     },
-    "II. Fase Lectura del Expediente": {
+    "II. Fase Lectura": {
         "descripcion": "Análisis comprensivo (0.5 días)",
-        "pasos": [
-            "01) Lectura completa y comprensiva",
-            "02) Identificación de puntos clave",
-            "03) Toma de notas relevantes"
-        ]
+        "pasos": ["01) Lectura completa", "02) Identificar claves", "03) Toma de notas"]
     },
-    "III. Fase Elaboración de Sentencia": {
+    "III. Fase Sentencia": {
         "descripcion": "Redacción del fallo (5 días)",
         "pasos": [
-            "01) Elegir modelo, guardar y rotular",
-            "02) Sintetizar escritos fundamentales",
-            "03) Agrego al borrador la síntesis",
-            "04) Investigación jurídica y resíntesis",
-            "05) Alojar investigaciones en carpeta",
-            "06) Investigación jurisprudencial",
-            "07) Valorar pruebas individual y conjunto",
-            "08) Elaborar 6 etapas de sentencia oral",
-            "09) Enriquecer jurisprudencialmente",
-            "10) Guardar proyecto en carpeta"
+            "01) Elegir modelo", "02) Sintetizar escritos", "03) Agregar síntesis",
+            "04) Investigación jurídica", "05) Alojar investigaciones", "06) Jurisprudencia",
+            "07) Valorar pruebas", "08) 6 etapas sentencia", "09) Enriquecer proyecto",
+            "10) Guardar proyecto"
         ]
     },
-    "IV. Fase Preparación Audiencia": {
-        "descripcion": "Preparación inteligente (2 días)",
-        "pasos": [
-            "01) Opero conforme el algoritmo",
-            "02) Presupuestos procesales y sustanciales",
-            "03) Creo la capa",
-            "04) Control de asistencia",
-            "05) Elijo y hago el roteiro"
-        ]
+    "IV. Fase Audiencia": {
+        "descripcion": "Preparación oralidad (2 días)",
+        "pasos": ["01) Operar algoritmo", "02) Presupuestos", "03) Crear capa", 
+                  "04) Asistencia", "05) Roteiro"]
     }
 }
 
-# --- 3. CONEXIÓN A GOOGLE SHEETS ---
+# --- 3. CONEXIÓN ---
 @st.cache_resource
 def get_connection():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -115,10 +81,9 @@ def get_data():
     try:
         sh = client.open("DB_Control_Sentencias")
     except:
-        st.error("🚨 Error crítico: No encuentro la hoja 'DB_Control_Sentencias' en tu Google Drive.")
+        st.error("🚨 Error: No encuentro 'DB_Control_Sentencias' en Drive.")
         st.stop()
         
-    # Inicializar Hojas si no existen
     try:
         w_proc = sh.worksheet("Procesos")
     except:
@@ -129,235 +94,173 @@ def get_data():
         w_det = sh.worksheet("Detalles")
     except:
         w_det = sh.add_worksheet("Detalles", 2000, 10)
-        # Estructura: id_proceso, fase, paso_index, valor(0/1), tiempo_acumulado, timestamp_inicio, timer_activo(0/1)
+        # Headers iniciales
         w_det.append_row(["id_proc", "fase", "paso", "valor", "tiempo", "inicio", "activo"])
         
     return w_proc, w_det
 
-# --- 4. FUNCIONES DE LÓGICA ---
+# --- 4. VISUALES Y LÓGICA ---
 def formatear_tiempo(segundos):
     segundos = int(segundos)
     if segundos < 60: return f"{segundos}s"
-    minutes = segundos // 60
-    if minutes < 60: return f"{minutes}m {segundos % 60}s"
-    hours = minutes // 60
-    return f"{hours}h {minutes % 60}m"
+    mins = segundos // 60
+    return f"{mins}m {segundos % 60}s"
 
-# --- 5. INTERFAZ: NUEVO PROCESO ---
 def vista_nuevo_proceso(w_proc):
     st.markdown('<div class="main-header">➕ Nuevo Expediente</div>', unsafe_allow_html=True)
-    
-    with st.form("form_nuevo"):
-        col1, col2 = st.columns(2)
-        with col1:
-            radicado = st.text_input("Número de Radicado", placeholder="Ej: 2026-001-CIVIL")
-        with col2:
-            st.info("El proceso iniciará en la Fase I automáticamente.")
-            
-        submitted = st.form_submit_button("🚀 Crear Expediente")
-        
-        if submitted:
-            if not radicado:
-                st.error("El radicado es obligatorio.")
-                return
-                
-            # Validar duplicados
+    with st.form("new_frm"):
+        rad = st.text_input("Radicado:")
+        if st.form_submit_button("Crear"):
             df = pd.DataFrame(w_proc.get_all_records())
-            if not df.empty and str(radicado) in df['radicado'].astype(str).values:
-                st.error("¡Este expediente ya existe!")
+            # Validación segura de duplicados
+            existe = False
+            if not df.empty and 'radicado' in df.columns:
+                if str(rad) in df['radicado'].astype(str).values:
+                    existe = True
+            
+            if existe:
+                st.error("¡Ya existe!")
             else:
                 new_id = int(time.time())
                 fecha = datetime.now().strftime("%Y-%m-%d")
-                w_proc.append_row([new_id, radicado, fecha, "Activo", "I. Fase Propedéutica", 0])
-                st.success(f"✅ Expediente {radicado} creado en la Nube.")
-                time.sleep(1.5)
+                w_proc.append_row([new_id, rad, fecha, "Activo", "I. Fase Propedéutica", 0])
+                st.success("¡Creado!")
+                time.sleep(1)
                 st.rerun()
 
-# --- 6. INTERFAZ: GESTIÓN PRINCIPAL ---
 def vista_gestion(w_proc, w_det, df_proc):
-    st.markdown('<div class="main-header">📂 Gestión de Expedientes</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">📂 Gestión</div>', unsafe_allow_html=True)
     
-    # Selector
-    lista_opciones = df_proc['radicado'].tolist()
-    seleccion = st.selectbox("Seleccione el Expediente a trabajar:", lista_opciones)
+    lista = df_proc['radicado'].tolist()
+    sel = st.selectbox("Expediente:", lista)
     
-    # Obtener datos del seleccionado
-    row = df_proc[df_proc['radicado'] == seleccion].iloc[0]
+    row = df_proc[df_proc['radicado'] == sel].iloc[0]
     proc_id = int(row['id'])
     
-    # Encabezado del Proceso
-    st.info(f"📌 **Radicado:** {row['radicado']} | **Fase Actual:** {row['fase_actual']} | **Progreso Global:** {row['progreso']}%")
-    global_progress_bar = st.progress(int(row['progreso']) / 100)
+    st.info(f"Fase: {row['fase_actual']} | Progreso: {row['progreso']}%")
     
-    # Cargar detalles de este proceso
+    # --- BLINDAJE DE DATOS (AQUÍ ESTÁ LA SOLUCIÓN) ---
     data_det = w_det.get_all_records()
     df_d = pd.DataFrame(data_det)
+    
+    # Definimos las columnas obligatorias
+    columnas_obligatorias = ["id_proc", "fase", "paso", "valor", "tiempo", "inicio", "activo"]
+    
+    # Si está vacío o falta alguna columna, reconstruimos el DataFrame
+    if df_d.empty or not set(columnas_obligatorias).issubset(df_d.columns):
+        df_d = pd.DataFrame(columns=columnas_obligatorias)
+    
+    # Filtrar por el proceso actual
     if not df_d.empty:
         df_d = df_d[df_d['id_proc'] == proc_id]
-    
-    # Variables para cálculo global
-    total_pasos_global = 0
-    total_completados_global = 0
-    
-    # --- ITERAR FASES ---
-    listado_fases = FASES_PROCESO.items() # Para evitar error de sintaxis
-    
-    for fase_nombre, info in listado_fases:
-        es_fase_actual = (fase_nombre == row['fase_actual'])
-        
-        with st.expander(f"📁 {fase_nombre}", expanded=es_fase_actual):
-            st.markdown(f"_{info['descripcion']}_")
+
+    # Iterar Fases
+    listado = FASES_PROCESO.items()
+    for fase, info in listado:
+        expandir = (fase == row['fase_actual'])
+        with st.expander(f"📁 {fase}", expanded=expandir):
             
-            # --- A. CRONÓMETRO ---
-            # Buscar último estado del reloj (paso = -1)
-            t_row = df_d[(df_d['fase'] == fase_nombre) & (df_d['paso'] == -1)]
+            # A. RELOJ
+            # Buscamos en el DF seguro
+            t_row = df_d[(df_d['fase'] == fase) & (df_d['paso'] == -1)]
             
-            t_acumulado = 0.0
-            t_activo = 0
-            t_inicio = 0.0
+            t_acum = 0.0
+            t_act = 0
+            t_ini = 0.0
             
             if not t_row.empty:
-                ultimo_reg = t_row.iloc[-1]
-                t_acumulado = float(ultimo_reg['tiempo'])
-                t_activo = int(ultimo_reg['activo'])
-                t_inicio = float(ultimo_reg['inicio'])
+                last = t_row.iloc[-1]
+                t_acum = float(last['tiempo'])
+                t_act = int(last['activo'])
+                t_ini = float(last['inicio'])
             
-            # Calcular tiempo real visual
-            t_mostrar = t_acumulado
-            if t_activo == 1:
-                t_mostrar += (time.time() - t_inicio)
-                time.sleep(1) # Refresco automático
+            t_show = t_acum
+            if t_act:
+                t_show += (time.time() - t_ini)
+                time.sleep(1)
                 st.rerun()
             
-            c1, c2, c3 = st.columns([2, 1, 1])
-            c1.markdown(f"### ⏱️ `{formatear_tiempo(t_mostrar)}`")
+            c1, c2 = st.columns([3, 1])
+            c1.markdown(f"⏱️ `{formatear_tiempo(t_show)}`")
             
-            if t_activo == 0:
-                if c2.button("▶️ Iniciar", key=f"start_{proc_id}_{fase_nombre}"):
-                    # Guardar inicio
-                    w_det.append_row([proc_id, fase_nombre, -1, 0, t_acumulado, time.time(), 1])
+            if t_act == 0:
+                if c2.button("▶️", key=f"s_{proc_id}_{fase}"):
+                    w_det.append_row([proc_id, fase, -1, 0, t_acum, time.time(), 1])
                     st.rerun()
             else:
-                if c2.button("⏸️ Pausar", key=f"pause_{proc_id}_{fase_nombre}"):
-                    # Guardar pausa y actualizar acumulado
-                    nuevo_acum = t_acumulado + (time.time() - t_inicio)
-                    w_det.append_row([proc_id, fase_nombre, -1, 0, nuevo_acum, 0, 0])
+                if c2.button("⏸️", key=f"p_{proc_id}_{fase}"):
+                    n_acum = t_acum + (time.time() - t_ini)
+                    w_det.append_row([proc_id, fase, -1, 0, n_acum, 0, 0])
                     st.rerun()
             
             st.divider()
             
-            # --- B. LISTA DE PASOS ---
+            # B. CHECKLIST
             pasos = info['pasos']
-            total_pasos_global += len(pasos)
-            ok_local = 0
-            
-            for i, texto_paso in enumerate(pasos):
-                # Buscar estado del checkbox
-                chk_row = df_d[(df_d['fase'] == fase_nombre) & (df_d['paso'] == i)]
+            ok_count = 0
+            for i, txt in enumerate(pasos):
+                p_row = df_d[(df_d['fase'] == fase) & (df_d['paso'] == i)]
                 checked = False
-                if not chk_row.empty:
-                    checked = bool(chk_row.iloc[-1]['valor'])
+                if not p_row.empty:
+                    checked = bool(p_row.iloc[-1]['valor'])
                 
-                # Checkbox
-                col_chk, col_txt = st.columns([1, 15])
-                nuevo_valor = col_chk.checkbox("", value=checked, key=f"chk_{proc_id}_{fase_nombre}_{i}")
-                col_txt.write(texto_paso)
+                c_chk, c_txt = st.columns([1, 15])
+                new_val = c_chk.checkbox("", value=checked, key=f"k_{proc_id}_{fase}_{i}")
+                c_txt.write(txt)
                 
-                if nuevo_valor:
-                    ok_local += 1
+                if new_val: ok_count += 1
                 
-                # Guardar cambios si hubo clic
-                if nuevo_valor != checked:
-                    val_num = 1 if nuevo_valor else 0
-                    w_det.append_row([proc_id, fase_nombre, i, val_num, 0, 0, 0])
+                if new_val != checked:
+                    val = 1 if new_val else 0
+                    w_det.append_row([proc_id, fase, i, val, 0, 0, 0])
                     st.rerun()
             
-            # Barra de progreso local
-            progreso_local = ok_local / len(pasos)
-            st.progress(progreso_local)
-            st.caption(f"Progreso de Fase: {int(progreso_local*100)}%")
+            prog = ok_count / len(pasos) if len(pasos) > 0 else 0
+            st.progress(prog)
             
-            total_completados_global += ok_local
+            # Actualizar Progreso Global
+            if expandir and len(pasos) > 0:
+                new_glob = int(prog * 100)
+                if new_glob != int(row['progreso']):
+                     try:
+                         cell = w_proc.find(str(sel))
+                         w_proc.update_cell(cell.row, 6, new_glob)
+                     except: pass
 
-    # --- ACTUALIZAR PROGRESO GLOBAL ---
-    if total_pasos_global > 0:
-        nuevo_progreso_global = int((total_completados_global / total_pasos_global) * 100)
-        # Solo actualizamos si cambió (para no saturar Sheets)
-        if nuevo_progreso_global != int(row['progreso']):
-            # Buscar celda y actualizar
-            try:
-                cell = w_proc.find(str(row['radicado']))
-                if cell:
-                    w_proc.update_cell(cell.row, 6, nuevo_progreso_global) # Columna 6 es progreso
-            except:
-                pass
-
-# --- 7. INTERFAZ: REPORTES Y DASHBOARD ---
-def vista_reportes(df_proc):
-    st.markdown('<div class="main-header">📊 Dashboard y Reportes</div>', unsafe_allow_html=True)
-    
-    if df_proc.empty:
-        st.warning("No hay datos para mostrar.")
-        return
-
-    # Tarjetas Métricas
-    c1, c2, c3 = st.columns(3)
-    c1.markdown(f'<div class="metric-card"><h1>{len(df_proc)}</h1>Total Expedientes</div>', unsafe_allow_html=True)
-    
-    promedio = df_proc['progreso'].mean()
-    c2.markdown(f'<div class="metric-card"><h1>{promedio:.1f}%</h1>Avance Promedio</div>', unsafe_allow_html=True)
-    
-    activos = len(df_proc[df_proc['estado'] == 'Activo'])
-    c3.markdown(f'<div class="metric-card"><h1>{activos}</h1>En Trámite</div>', unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Gráficos
-    col_g1, col_g2 = st.columns(2)
-    
-    with col_g1:
-        st.subheader("Estado de Avance por Expediente")
-        fig_bar = px.bar(df_proc, x='radicado', y='progreso', color='fase_actual', 
-                         title="Progreso Individual", height=400)
-        st.plotly_chart(fig_bar, use_container_width=True)
-        
-    with col_g2:
-        st.subheader("Distribución por Fases")
-        conteo_fases = df_proc['fase_actual'].value_counts().reset_index()
-        conteo_fases.columns = ['Fase', 'Cantidad']
-        fig_pie = px.pie(conteo_fases, values='Cantidad', names='Fase', 
-                         title="Carga de Trabajo por Fase", height=400)
-        st.plotly_chart(fig_pie, use_container_width=True)
-    
-    st.markdown("### 📋 Tabla de Datos")
-    st.dataframe(df_proc[['radicado', 'fecha', 'fase_actual', 'progreso', 'estado']], use_container_width=True)
-
-# --- 8. EJECUCIÓN PRINCIPAL ---
 def main():
     w_proc, w_det = get_data()
     data_proc = w_proc.get_all_records()
     df_proc = pd.DataFrame(data_proc)
     
-    # Barra Lateral
+    # Manejo de DF vacío en Procesos
+    cols_proc = ["id", "radicado", "fecha", "estado", "fase_actual", "progreso"]
+    if df_proc.empty or not set(cols_proc).issubset(df_proc.columns):
+        df_proc = pd.DataFrame(columns=cols_proc)
+
     st.sidebar.title("⚖️ Magistratura")
-    st.sidebar.markdown("---")
-    opcion = st.sidebar.radio("Navegación", 
-        ["🏠 Dashboard", "➕ Nuevo Proceso", "📂 Mis Expedientes", "📈 Reportes"]
-    )
-    st.sidebar.markdown("---")
-    st.sidebar.caption("🟢 Sistema Online | Sincronizado con Google Drive")
+    opc = st.sidebar.radio("Menú", ["Dashboard", "Nuevo Proceso", "Mis Expedientes"])
     
-    if opcion == "🏠 Dashboard":
-        vista_reportes(df_proc) # El dashboard es lo mismo que reportes simplificado
-    elif opcion == "➕ Nuevo Proceso":
-        vista_nuevo_proceso(w_proc)
-    elif opcion == "📂 Mis Expedientes":
+    if opc == "Dashboard":
+        st.markdown('<div class="main-header">📊 Dashboard</div>', unsafe_allow_html=True)
         if df_proc.empty:
-            st.info("No hay expedientes creados. Ve a 'Nuevo Proceso'.")
+            st.info("Sin datos.")
+        else:
+            c1, c2 = st.columns(2)
+            c1.markdown(f'<div class="metric-card"><h1>{len(df_proc)}</h1>Procesos</div>', unsafe_allow_html=True)
+            if 'progreso' in df_proc.columns and not df_proc['progreso'].empty:
+                 prom = pd.to_numeric(df_proc['progreso'], errors='coerce').mean()
+            else:
+                 prom = 0
+            c2.markdown(f'<div class="metric-card"><h1>{prom:.1f}%</h1>Avance</div>', unsafe_allow_html=True)
+
+    elif opc == "Nuevo Proceso":
+        vista_nuevo_proceso(w_proc)
+        
+    elif opc == "Mis Expedientes":
+        if df_proc.empty:
+            st.warning("Crea un proceso primero.")
         else:
             vista_gestion(w_proc, w_det, df_proc)
-    elif opcion == "📈 Reportes":
-        vista_reportes(df_proc)
 
 if __name__ == "__main__":
     main()
