@@ -6,7 +6,7 @@ import time
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# --- 1. CONFIGURACIÓN ---
+# --- 1. CONFIGURACIÓN Y ESTILOS ---
 st.set_page_config(
     page_title="Magistratura Cloud",
     page_icon="⚖️",
@@ -14,6 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# CSS Personalizado (El diseño bonito)
 st.markdown("""
 <style>
     .main-header {
@@ -23,6 +24,7 @@ st.markdown("""
         text-align: center;
         border-bottom: 3px solid #d4a574;
         margin-bottom: 20px;
+        padding-bottom: 10px;
     }
     .metric-card {
         background: linear-gradient(135deg, #1f4e79, #2d5aa0);
@@ -30,6 +32,14 @@ st.markdown("""
         padding: 15px;
         border-radius: 10px;
         text-align: center;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+    }
+    .phase-header {
+        background-color: #f8f9fa;
+        padding: 10px;
+        border-left: 5px solid #1f4e79;
+        border-radius: 5px;
+        margin-top: 10px;
     }
     .stProgress > div > div > div > div {
         background-color: #28a745;
@@ -37,7 +47,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. FASES ---
+# --- 2. DEFINICIÓN DETALLADA DE FASES ---
 FASES_PROCESO = {
     "I. Fase Propedéutica": {
         "descripcion": "Preparación y Auto de Pruebas",
@@ -94,12 +104,11 @@ def get_data():
         w_det = sh.worksheet("Detalles")
     except:
         w_det = sh.add_worksheet("Detalles", 2000, 10)
-        # Headers iniciales
         w_det.append_row(["id_proc", "fase", "paso", "valor", "tiempo", "inicio", "activo"])
         
     return w_proc, w_det
 
-# --- 4. VISUALES Y LÓGICA ---
+# --- 4. FUNCIONES VISUALES Y LÓGICA ---
 def formatear_tiempo(segundos):
     segundos = int(segundos)
     if segundos < 60: return f"{segundos}s"
@@ -109,48 +118,55 @@ def formatear_tiempo(segundos):
 def vista_nuevo_proceso(w_proc):
     st.markdown('<div class="main-header">➕ Nuevo Expediente</div>', unsafe_allow_html=True)
     with st.form("new_frm"):
-        rad = st.text_input("Radicado:")
-        if st.form_submit_button("Crear"):
+        col1, col2 = st.columns(2)
+        with col1:
+            rad = st.text_input("Número de Radicado", placeholder="Ej: 2026-001")
+        with col2:
+            st.info("El proceso iniciará en Fase I automáticamente.")
+            
+        if st.form_submit_button("🚀 Crear Expediente"):
             df = pd.DataFrame(w_proc.get_all_records())
-            # Validación segura de duplicados
+            
+            # Validación segura
             existe = False
             if not df.empty and 'radicado' in df.columns:
                 if str(rad) in df['radicado'].astype(str).values:
                     existe = True
             
             if existe:
-                st.error("¡Ya existe!")
+                st.error("¡Este radicado ya existe!")
+            elif not rad:
+                st.error("Debes escribir un radicado.")
             else:
                 new_id = int(time.time())
                 fecha = datetime.now().strftime("%Y-%m-%d")
                 w_proc.append_row([new_id, rad, fecha, "Activo", "I. Fase Propedéutica", 0])
-                st.success("¡Creado!")
+                st.success("✅ ¡Expediente Creado!")
                 time.sleep(1)
                 st.rerun()
 
 def vista_gestion(w_proc, w_det, df_proc):
-    st.markdown('<div class="main-header">📂 Gestión</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">📂 Gestión de Expedientes</div>', unsafe_allow_html=True)
     
     lista = df_proc['radicado'].tolist()
-    sel = st.selectbox("Expediente:", lista)
+    sel = st.selectbox("Seleccione el Expediente a trabajar:", lista)
     
     row = df_proc[df_proc['radicado'] == sel].iloc[0]
     proc_id = int(row['id'])
     
-    st.info(f"Fase: {row['fase_actual']} | Progreso: {row['progreso']}%")
+    # Header del Proceso
+    st.info(f"📌 **Radicado:** {row['radicado']} | **Fase Actual:** {row['fase_actual']} | **Progreso Global:** {row['progreso']}%")
     
-    # --- BLINDAJE DE DATOS (AQUÍ ESTÁ LA SOLUCIÓN) ---
+    # --- BLINDAJE DE DATOS ---
     data_det = w_det.get_all_records()
     df_d = pd.DataFrame(data_det)
     
-    # Definimos las columnas obligatorias
-    columnas_obligatorias = ["id_proc", "fase", "paso", "valor", "tiempo", "inicio", "activo"]
+    # Reconstrucción de seguridad si está vacío
+    cols_obligatorias = ["id_proc", "fase", "paso", "valor", "tiempo", "inicio", "activo"]
+    if df_d.empty or not set(cols_obligatorias).issubset(df_d.columns):
+        df_d = pd.DataFrame(columns=cols_obligatorias)
     
-    # Si está vacío o falta alguna columna, reconstruimos el DataFrame
-    if df_d.empty or not set(columnas_obligatorias).issubset(df_d.columns):
-        df_d = pd.DataFrame(columns=columnas_obligatorias)
-    
-    # Filtrar por el proceso actual
+    # Filtrar
     if not df_d.empty:
         df_d = df_d[df_d['id_proc'] == proc_id]
 
@@ -159,9 +175,9 @@ def vista_gestion(w_proc, w_det, df_proc):
     for fase, info in listado:
         expandir = (fase == row['fase_actual'])
         with st.expander(f"📁 {fase}", expanded=expandir):
+            st.caption(f"_{info['descripcion']}_")
             
             # A. RELOJ
-            # Buscamos en el DF seguro
             t_row = df_d[(df_d['fase'] == fase) & (df_d['paso'] == -1)]
             
             t_acum = 0.0
@@ -181,14 +197,14 @@ def vista_gestion(w_proc, w_det, df_proc):
                 st.rerun()
             
             c1, c2 = st.columns([3, 1])
-            c1.markdown(f"⏱️ `{formatear_tiempo(t_show)}`")
+            c1.markdown(f"### ⏱️ `{formatear_tiempo(t_show)}`")
             
             if t_act == 0:
-                if c2.button("▶️", key=f"s_{proc_id}_{fase}"):
+                if c2.button("▶️ Iniciar", key=f"s_{proc_id}_{fase}"):
                     w_det.append_row([proc_id, fase, -1, 0, t_acum, time.time(), 1])
                     st.rerun()
             else:
-                if c2.button("⏸️", key=f"p_{proc_id}_{fase}"):
+                if c2.button("⏸️ Pausar", key=f"p_{proc_id}_{fase}"):
                     n_acum = t_acum + (time.time() - t_ini)
                     w_det.append_row([proc_id, fase, -1, 0, n_acum, 0, 0])
                     st.rerun()
@@ -227,40 +243,92 @@ def vista_gestion(w_proc, w_det, df_proc):
                          w_proc.update_cell(cell.row, 6, new_glob)
                      except: pass
 
+def vista_reportes(df_proc):
+    st.markdown('<div class="main-header">📊 Dashboard y Reportes</div>', unsafe_allow_html=True)
+    
+    if df_proc.empty:
+        st.warning("No hay datos para mostrar aún.")
+        return
+
+    # Tarjetas Métricas
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(f'<div class="metric-card"><h1>{len(df_proc)}</h1>Total Expedientes</div>', unsafe_allow_html=True)
+    
+    # Cálculo seguro del promedio
+    promedio = 0
+    if 'progreso' in df_proc.columns:
+        promedio = pd.to_numeric(df_proc['progreso'], errors='coerce').mean()
+    
+    c2.markdown(f'<div class="metric-card"><h1>{promedio:.1f}%</h1>Avance Promedio</div>', unsafe_allow_html=True)
+    
+    activos = 0
+    if 'estado' in df_proc.columns:
+        activos = len(df_proc[df_proc['estado'] == 'Activo'])
+    
+    c3.markdown(f'<div class="metric-card"><h1>{activos}</h1>En Trámite</div>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Gráficos
+    col_g1, col_g2 = st.columns(2)
+    
+    with col_g1:
+        st.subheader("Estado de Avance por Expediente")
+        if not df_proc.empty and 'radicado' in df_proc.columns and 'progreso' in df_proc.columns:
+            fig_bar = px.bar(df_proc, x='radicado', y='progreso', color='fase_actual', 
+                            title="Progreso Individual", height=400)
+            st.plotly_chart(fig_bar, use_container_width=True)
+        
+    with col_g2:
+        st.subheader("Distribución por Fases")
+        if not df_proc.empty and 'fase_actual' in df_proc.columns:
+            conteo_fases = df_proc['fase_actual'].value_counts().reset_index()
+            conteo_fases.columns = ['Fase', 'Cantidad']
+            fig_pie = px.pie(conteo_fases, values='Cantidad', names='Fase', 
+                            title="Carga de Trabajo", height=400)
+            st.plotly_chart(fig_pie, use_container_width=True)
+    
+    st.markdown("### 📋 Tabla de Datos")
+    st.dataframe(df_proc, use_container_width=True)
+
+# --- 5. MAIN ---
 def main():
     w_proc, w_det = get_data()
-    data_proc = w_proc.get_all_records()
-    df_proc = pd.DataFrame(data_proc)
+    df_proc = pd.DataFrame(w_proc.get_all_records())
     
     # Manejo de DF vacío en Procesos
     cols_proc = ["id", "radicado", "fecha", "estado", "fase_actual", "progreso"]
     if df_proc.empty or not set(cols_proc).issubset(df_proc.columns):
         df_proc = pd.DataFrame(columns=cols_proc)
 
+    # --- BARRA LATERAL CON ÍCONOS ---
     st.sidebar.title("⚖️ Magistratura")
-    opc = st.sidebar.radio("Menú", ["Dashboard", "Nuevo Proceso", "Mis Expedientes"])
+    st.sidebar.markdown("---")
     
-    if opc == "Dashboard":
-        st.markdown('<div class="main-header">📊 Dashboard</div>', unsafe_allow_html=True)
-        if df_proc.empty:
-            st.info("Sin datos.")
-        else:
-            c1, c2 = st.columns(2)
-            c1.markdown(f'<div class="metric-card"><h1>{len(df_proc)}</h1>Procesos</div>', unsafe_allow_html=True)
-            if 'progreso' in df_proc.columns and not df_proc['progreso'].empty:
-                 prom = pd.to_numeric(df_proc['progreso'], errors='coerce').mean()
-            else:
-                 prom = 0
-            c2.markdown(f'<div class="metric-card"><h1>{prom:.1f}%</h1>Avance</div>', unsafe_allow_html=True)
-
-    elif opc == "Nuevo Proceso":
+    # Menú Restaurado
+    opcion = st.sidebar.radio("Navegación", 
+        ["🏠 Dashboard", "➕ Nuevo Proceso", "📂 Mis Expedientes", "📈 Reportes"]
+    )
+    
+    st.sidebar.markdown("---")
+    st.sidebar.caption("🟢 Sistema Online v2.0")
+    
+    # Lógica de Navegación
+    if opcion == "🏠 Dashboard":
+        # Dashboard simplificado (o reusa reportes)
+        vista_reportes(df_proc)
+        
+    elif opcion == "➕ Nuevo Proceso":
         vista_nuevo_proceso(w_proc)
         
-    elif opc == "Mis Expedientes":
+    elif opcion == "📂 Mis Expedientes":
         if df_proc.empty:
-            st.warning("Crea un proceso primero.")
+            st.warning("⚠️ No hay expedientes. Ve a 'Nuevo Proceso' para crear uno.")
         else:
             vista_gestion(w_proc, w_det, df_proc)
+            
+    elif opcion == "📈 Reportes":
+        vista_reportes(df_proc)
 
 if __name__ == "__main__":
     main()
