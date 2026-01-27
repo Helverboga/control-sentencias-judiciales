@@ -144,4 +144,113 @@ def gestionar(w_proc, w_detalles, df_proc):
     total_pasos = 0
     total_ok = 0
     
-    for fase, info in FASES_PROCESO.
+    for fase, info in FASES_PROCESO.items():
+        with st.expander(f"📌 {fase}", expanded=(fase == row['fase_actual'])):
+            
+            # --- CRONÓMETRO ---
+            # Buscar último registro de tiempo (paso_idx = -1)
+            t_row = df_det[(df_det['fase'] == fase) & (df_det['paso_idx'] == -1)]
+            
+            t_acum = 0.0
+            t_activo = 0
+            t_inicio = 0.0
+            
+            if not t_row.empty:
+                # Tomamos el último registro válido
+                last = t_row.iloc[-1]
+                t_acum = float(last['tiempo'])
+                t_activo = int(last['activo'])
+                t_inicio = float(last['inicio'])
+            
+            t_show = t_acum
+            if t_activo:
+                t_show += (time.time() - t_inicio)
+                time.sleep(1) # Refresco
+                st.rerun()
+                
+            c1, c2 = st.columns([3, 1])
+            c1.write(f"⏱️ **Tiempo:** `{formatear_tiempo(t_show)}`")
+            
+            if t_activo:
+                if c2.button("⏸️ Pausar", key=f"p_{proc_id}_{fase}"):
+                    nuevo_t = t_acum + (time.time() - t_inicio)
+                    # Guardar fila de pausa: paso_idx=-1, activo=0
+                    w_detalles.append_row([proc_id, fase, -1, 0, nuevo_t, 0, 0])
+                    st.rerun()
+            else:
+                if c2.button("▶️ Iniciar", key=f"s_{proc_id}_{fase}"):
+                    # Guardar fila de inicio: paso_idx=-1, activo=1
+                    w_detalles.append_row([proc_id, fase, -1, 0, t_acum, time.time(), 1])
+                    st.rerun()
+            
+            st.divider()
+            
+            # --- CHECKLIST ---
+            pasos = info['pasos']
+            total_pasos += len(pasos)
+            ok_fase = 0
+            
+            for i, txt in enumerate(pasos):
+                # Buscar estado
+                p_row = df_det[(df_det['fase'] == fase) & (df_det['paso_idx'] == i)]
+                checked = False
+                if not p_row.empty:
+                    checked = bool(p_row.iloc[-1]['val'])
+                
+                col_c, col_t = st.columns([1, 12])
+                new_val = col_c.checkbox("", value=checked, key=f"c_{proc_id}_{fase}_{i}")
+                col_t.write(txt)
+                
+                if new_val: ok_fase += 1
+                
+                if new_val != checked:
+                    # Guardar cambio: val=1 o 0
+                    v_num = 1 if new_val else 0
+                    w_detalles.append_row([proc_id, fase, i, v_num, 0, 0, 0])
+                    st.rerun()
+            
+            st.progress(ok_fase / len(pasos))
+            total_ok += ok_fase
+
+    # Actualizar Global
+    if total_pasos > 0:
+        new_prog = int((total_ok / total_pasos) * 100)
+        # Actualizar celda de progreso (Columna 6) en la hoja Procesos
+        # Buscamos la fila por ID (forma simplificada: buscar texto del radicado)
+        try:
+            cell = w_proc.find(str(row['radicado']))
+            w_proc.update_cell(cell.row, 6, new_prog)
+        except:
+            pass # Si no encuentra, no rompe la app
+
+# --- MAIN ---
+def main():
+    w_proc, w_det = get_data()
+    data = w_proc.get_all_records()
+    df = pd.DataFrame(data)
+    
+    st.sidebar.title("⚖️ Magistratura")
+    opcion = st.sidebar.radio("Menú", ["Dashboard", "Nuevo Proceso", "Gestionar"])
+    
+    if opcion == "Dashboard":
+        st.markdown('<div class="main-header">📊 Resumen</div>', unsafe_allow_html=True)
+        if not df.empty:
+            c1, c2 = st.columns(2)
+            c1.markdown(f'<div class="metric-card"><h1>{len(df)}</h1>Procesos</div>', unsafe_allow_html=True)
+            prom = df['progreso'].mean()
+            c2.markdown(f'<div class="metric-card"><h1>{prom:.1f}%</h1>Avance</div>', unsafe_allow_html=True)
+            st.bar_chart(df, x="radicado", y="progreso")
+        else:
+            st.info("Sin datos.")
+            
+    elif opcion == "Nuevo Proceso":
+        nuevo_proceso(w_proc)
+        
+    elif opcion == "Gestionar":
+        if df.empty:
+            st.warning("Crea un proceso primero.")
+        else:
+            gestionar(w_proc, w_det, df)
+
+if __name__ == "__main__":
+    main()
