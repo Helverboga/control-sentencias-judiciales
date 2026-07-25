@@ -78,6 +78,15 @@ FASES_PROCESO = {
     }
 }
 
+FASE_ORDEN = list(FASES_PROCESO.keys())
+
+def siguiente_fase(fase_actual):
+    """Devuelve el nombre de la fase que sigue, o None si ya es la última."""
+    idx = FASE_ORDEN.index(fase_actual)
+    if idx + 1 < len(FASE_ORDEN):
+        return FASE_ORDEN[idx + 1]
+    return None
+
 # --- 3. CONEXIÓN ---
 @st.cache_resource
 def get_connection():
@@ -234,14 +243,58 @@ def vista_gestion(w_proc, w_det, df_proc):
             prog = ok_count / len(pasos) if len(pasos) > 0 else 0
             st.progress(prog)
             
-            # Actualizar Progreso Global
+            # Actualizar Progreso Global y avanzar de fase si se completó el checklist
             if expandir and len(pasos) > 0:
                 new_glob = int(prog * 100)
-                if new_glob != int(row['progreso']):
-                     try:
-                         cell = w_proc.find(str(sel))
-                         w_proc.update_cell(cell.row, 6, new_glob)
-                     except: pass
+                try:
+                    cell = w_proc.find(str(sel))
+                except Exception:
+                    cell = None
+
+                if cell and new_glob != int(row['progreso']):
+                    w_proc.update_cell(cell.row, 6, new_glob)  # columna 6 = progreso
+
+                if cell and prog == 1:
+                    sig = siguiente_fase(fase)
+                    if sig:
+                        w_proc.update_cell(cell.row, 5, sig)   # columna 5 = fase_actual
+                        w_proc.update_cell(cell.row, 6, 0)     # el progreso arranca en 0 en la fase nueva
+                        st.success(f"✅ Fase completada. El expediente avanzó a: {sig}")
+                    else:
+                        w_proc.update_cell(cell.row, 4, "Finalizado")  # columna 4 = estado
+                        st.success("🏁 ¡Expediente completado en todas sus fases!")
+                    time.sleep(1)
+                    st.rerun()
+
+    # --- ZONA DE PELIGRO: ELIMINAR EXPEDIENTE ---
+    st.divider()
+    with st.expander("⚠️ Zona de peligro"):
+        st.warning("Esta acción elimina el expediente y todo su historial (checklist y tiempos registrados). No se puede deshacer.")
+        confirmar = st.checkbox(
+            f'Confirmo que deseo eliminar el expediente "{sel}" de forma permanente.',
+            key=f"confirm_del_{proc_id}"
+        )
+        if st.button("🗑️ Eliminar expediente definitivamente", disabled=not confirmar, key=f"del_{proc_id}"):
+            eliminar_expediente(w_proc, w_det, proc_id, sel)
+            st.success(f"Expediente {sel} eliminado.")
+            time.sleep(1)
+            st.rerun()
+
+def eliminar_expediente(w_proc, w_det, proc_id, radicado):
+    """Elimina la fila del expediente en 'Procesos' y todo su historial en 'Detalles'."""
+    cell = w_proc.find(str(radicado))
+    if cell:
+        w_proc.delete_rows(cell.row)
+
+    datos = w_det.get_all_values()
+    if datos:
+        encabezados = datos[0]
+        filas = datos[1:]
+        filas_restantes = [f for f in filas if f and str(f[0]) != str(proc_id)]
+        w_det.clear()
+        w_det.append_row(encabezados)
+        if filas_restantes:
+            w_det.append_rows(filas_restantes)
 
 def vista_reportes(df_proc):
     st.markdown('<div class="main-header">📊 Dashboard y Reportes</div>', unsafe_allow_html=True)
@@ -332,3 +385,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    Agregar función de eliminar y corregir avance de fase
