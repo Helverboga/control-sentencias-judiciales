@@ -385,4 +385,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    Agregar función de eliminar y corregir avance de fase
