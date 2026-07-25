@@ -95,23 +95,24 @@ def get_connection():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
+@st.cache_resource
 def get_data():
     client = get_connection()
     try:
         sh = client.open("DB_Control_Sentencias")
-    except:
+    except Exception:
         st.error("🚨 Error: No encuentro 'DB_Control_Sentencias' en Drive.")
         st.stop()
         
     try:
         w_proc = sh.worksheet("Procesos")
-    except:
+    except Exception:
         w_proc = sh.add_worksheet("Procesos", 100, 10)
         w_proc.append_row(["id", "radicado", "fecha", "estado", "fase_actual", "progreso"])
 
     try:
         w_det = sh.worksheet("Detalles")
-    except:
+    except Exception:
         w_det = sh.add_worksheet("Detalles", 2000, 10)
         w_det.append_row(["id_proc", "fase", "paso", "valor", "tiempo", "inicio", "activo"])
         
