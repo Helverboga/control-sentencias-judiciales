@@ -4,7 +4,7 @@ import plotly.express as px
 from datetime import datetime
 import time
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 
 # --- 1. CONFIGURACIÓN Y ESTILOS ---
 st.set_page_config(
@@ -79,6 +79,7 @@ FASES_PROCESO = {
 }
 
 FASE_ORDEN = list(FASES_PROCESO.keys())
+TOTAL_PASOS = sum(len(info['pasos']) for info in FASES_PROCESO.values())
 
 def siguiente_fase(fase_actual):
     """Devuelve el nombre de la fase que sigue, o None si ya es la última."""
@@ -88,11 +89,15 @@ def siguiente_fase(fase_actual):
     return None
 
 # --- 3. CONEXIÓN ---
+SCOPES = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive'
+]
+
 @st.cache_resource
 def get_connection():
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds_dict = dict(st.secrets["gcp_service_account"])
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     return gspread.authorize(creds)
 
 @st.cache_resource
@@ -118,13 +123,17 @@ def get_data():
         
     return w_proc, w_det
 
-# --- 4. FUNCIONES VISUALES Y LÓGICA ---
-def formatear_tiempo(segundos):
-    segundos = int(segundos)
-    if segundos < 60: return f"{segundos}s"
-    mins = segundos // 60
-    return f"{mins}m {segundos % 60}s"
+@st.cache_data(ttl=5)
+def leer_datos(_w_proc, _w_det):
+    """Lee ambas hojas con una caché corta de 5 segundos, para no golpear la API
+    de Google en cada recarga de la página. Después de cualquier escritura real
+    (marcar un paso, crear o eliminar un expediente) se llama leer_datos.clear()
+    para que el cambio se vea de inmediato."""
+    df_proc = pd.DataFrame(_w_proc.get_all_records())
+    df_det = pd.DataFrame(_w_det.get_all_records())
+    return df_proc, df_det
 
+# --- 4. FUNCIONES VISUALES Y LÓGICA ---
 def vista_nuevo_proceso(w_proc):
     st.markdown('<div class="main-header">➕ Nuevo Expediente</div>', unsafe_allow_html=True)
     with st.form("new_frm"):
@@ -151,6 +160,7 @@ def vista_nuevo_proceso(w_proc):
                 new_id = int(time.time())
                 fecha = datetime.now().strftime("%Y-%m-%d")
                 w_proc.append_row([new_id, rad, fecha, "Activo", "I. Fase Propedéutica", 0])
+                leer_datos.clear()
                 st.success("✅ ¡Expediente Creado!")
                 time.sleep(1)
                 st.rerun()
@@ -168,8 +178,8 @@ def vista_gestion(w_proc, w_det, df_proc):
     st.info(f"📌 **Radicado:** {row['radicado']} | **Fase Actual:** {row['fase_actual']} | **Progreso Global:** {row['progreso']}%")
     
     # --- BLINDAJE DE DATOS ---
-    data_det = w_det.get_all_records()
-    df_d = pd.DataFrame(data_det)
+    _, data_det = leer_datos(w_proc, w_det)
+    df_d = data_det.copy() if not data_det.empty else pd.DataFrame()
     
     # Reconstrucción de seguridad si está vacío
     cols_obligatorias = ["id_proc", "fase", "paso", "valor", "tiempo", "inicio", "activo"]
@@ -182,45 +192,12 @@ def vista_gestion(w_proc, w_det, df_proc):
 
     # Iterar Fases
     listado = FASES_PROCESO.items()
+    total_ok = 0
     for fase, info in listado:
         expandir = (fase == row['fase_actual'])
         with st.expander(f"📁 {fase}", expanded=expandir):
             st.caption(f"_{info['descripcion']}_")
-            
-            # A. RELOJ
-            t_row = df_d[(df_d['fase'] == fase) & (df_d['paso'] == -1)]
-            
-            t_acum = 0.0
-            t_act = 0
-            t_ini = 0.0
-            
-            if not t_row.empty:
-                last = t_row.iloc[-1]
-                t_acum = float(last['tiempo'])
-                t_act = int(last['activo'])
-                t_ini = float(last['inicio'])
-            
-            t_show = t_acum
-            if t_act:
-                t_show += (time.time() - t_ini)
-                time.sleep(1)
-                st.rerun()
-            
-            c1, c2 = st.columns([3, 1])
-            c1.markdown(f"### ⏱️ `{formatear_tiempo(t_show)}`")
-            
-            if t_act == 0:
-                if c2.button("▶️ Iniciar", key=f"s_{proc_id}_{fase}"):
-                    w_det.append_row([proc_id, fase, -1, 0, t_acum, time.time(), 1])
-                    st.rerun()
-            else:
-                if c2.button("⏸️ Pausar", key=f"p_{proc_id}_{fase}"):
-                    n_acum = t_acum + (time.time() - t_ini)
-                    w_det.append_row([proc_id, fase, -1, 0, n_acum, 0, 0])
-                    st.rerun()
-            
-            st.divider()
-            
+
             # B. CHECKLIST
             pasos = info['pasos']
             ok_count = 0
@@ -238,34 +215,43 @@ def vista_gestion(w_proc, w_det, df_proc):
                 
                 if new_val != checked:
                     val = 1 if new_val else 0
-                    w_det.append_row([proc_id, fase, i, val, 0, 0, 0])
+                    actualizar_o_crear_detalle(w_det, proc_id, fase, i, val)
+                    leer_datos.clear()
                     st.rerun()
             
             prog = ok_count / len(pasos) if len(pasos) > 0 else 0
             st.progress(prog)
-            
-            # Actualizar Progreso Global y avanzar de fase si se completó el checklist
-            if expandir and len(pasos) > 0:
-                new_glob = int(prog * 100)
+            total_ok += ok_count
+
+            # Avanzar a la siguiente fase si el checklist de la fase ACTIVA llegó al 100%
+            if expandir and len(pasos) > 0 and prog == 1:
                 try:
                     cell = w_proc.find(str(sel))
                 except Exception:
                     cell = None
 
-                if cell and new_glob != int(row['progreso']):
-                    w_proc.update_cell(cell.row, 6, new_glob)  # columna 6 = progreso
-
-                if cell and prog == 1:
+                if cell:
                     sig = siguiente_fase(fase)
                     if sig:
                         w_proc.update_cell(cell.row, 5, sig)   # columna 5 = fase_actual
-                        w_proc.update_cell(cell.row, 6, 0)     # el progreso arranca en 0 en la fase nueva
                         st.success(f"✅ Fase completada. El expediente avanzó a: {sig}")
                     else:
                         w_proc.update_cell(cell.row, 4, "Finalizado")  # columna 4 = estado
                         st.success("🏁 ¡Expediente completado en todas sus fases!")
+                    leer_datos.clear()
                     time.sleep(1)
                     st.rerun()
+
+    # Progreso ponderado del expediente completo (las 4 fases, según su cantidad de pasos)
+    progreso_ponderado = round((total_ok / TOTAL_PASOS) * 100) if TOTAL_PASOS > 0 else 0
+    if progreso_ponderado != int(row['progreso']):
+        try:
+            cell = w_proc.find(str(sel))
+            if cell:
+                w_proc.update_cell(cell.row, 6, progreso_ponderado)  # columna 6 = progreso
+                leer_datos.clear()
+        except Exception:
+            pass
 
     # --- ZONA DE PELIGRO: ELIMINAR EXPEDIENTE ---
     st.divider()
@@ -277,9 +263,25 @@ def vista_gestion(w_proc, w_det, df_proc):
         )
         if st.button("🗑️ Eliminar expediente definitivamente", disabled=not confirmar, key=f"del_{proc_id}"):
             eliminar_expediente(w_proc, w_det, proc_id, sel)
+            leer_datos.clear()
             st.success(f"Expediente {sel} eliminado.")
             time.sleep(1)
             st.rerun()
+
+def actualizar_o_crear_detalle(w_det, proc_id, fase, paso, valor):
+    """Actualiza en el lugar la fila del paso si ya existe; si no, la crea.
+    Evita que la hoja 'Detalles' crezca sin control con una fila nueva
+    cada vez que se marca o desmarca una casilla."""
+    datos = w_det.get_all_values()
+    fila_encontrada = None
+    for idx, f in enumerate(datos[1:], start=2):  # fila 1 = encabezados
+        if len(f) >= 4 and str(f[0]) == str(proc_id) and f[1] == fase and str(f[2]) == str(paso):
+            fila_encontrada = idx
+            break
+    if fila_encontrada:
+        w_det.update_cell(fila_encontrada, 4, valor)  # columna 4 = valor
+    else:
+        w_det.append_row([proc_id, fase, paso, valor, 0, 0, 0])
 
 def eliminar_expediente(w_proc, w_det, proc_id, radicado):
     """Elimina la fila del expediente en 'Procesos' y todo su historial en 'Detalles'."""
@@ -346,9 +348,27 @@ def vista_reportes(df_proc):
     st.dataframe(df_proc, use_container_width=True)
 
 # --- 5. MAIN ---
+def check_password():
+    """Devuelve True si ya se escribió la contraseña correcta en esta sesión."""
+    def password_entered():
+        if st.session_state["password"] == st.secrets["app_password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]
+        else:
+            st.session_state["password_correct"] = False
+
+    if st.session_state.get("password_correct", False):
+        return True
+
+    st.markdown('<div class="main-header">⚖️ Magistratura Cloud</div>', unsafe_allow_html=True)
+    st.text_input("Contraseña", type="password", on_change=password_entered, key="password")
+    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+        st.error("😕 Contraseña incorrecta")
+    return False
+
 def main():
     w_proc, w_det = get_data()
-    df_proc = pd.DataFrame(w_proc.get_all_records())
+    df_proc, _ = leer_datos(w_proc, w_det)
     
     # Manejo de DF vacío en Procesos
     cols_proc = ["id", "radicado", "fecha", "estado", "fase_actual", "progreso"]
@@ -385,4 +405,5 @@ def main():
         vista_reportes(df_proc)
 
 if __name__ == "__main__":
-    main()
+    if check_password():
+        main()
